@@ -1,4 +1,7 @@
 import com.google.common.collect.Iterables;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.function.VoidFunction;
@@ -17,17 +20,41 @@ import twitter4j.auth.OAuthAuthorization;
 import twitter4j.conf.Configuration;
 import twitter4j.conf.ConfigurationBuilder;
 
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Arrays;
+import java.util.Date;
+import java.util.Properties;
 import java.util.Scanner;
 
 public class TwitterDataAnalytics {
         public static void main(String[] args) throws IOException, InterruptedException, TwitterException {
 
+            Properties props = new Properties();
 
+            String topicName = "twitterData";
+
+            //Assign localhost id
+            props.put("bootstrap.servers", "localhost:9092");
+
+            //Set acknowledgements for producer requests.
+            props.put("acks", "all");
+
+                    //If the request fails, the producer can automatically retry,
+                    props.put("retries", 0);
+
+            //Specify buffer size in config
+            props.put("batch.size", 16384);
+
+            //Reduce the no of requests less than 0
+            props.put("linger.ms", 1);
+
+            //The buffer.memory controls the total amount of memory available to the producer for buffering.
+            props.put("buffer.memory", 33554432);
+
+            props.put("key.serializer",
+                    "org.apache.kafka.common.serialization.StringSerializer");
+
+            props.put("value.serializer",
+                    "org.apache.kafka.common.serialization.StringSerializer");
             String consumerKey = "X4MlpKe95iO7C2xdrSt8kk2cr";
             String consumerSecret = "cna0fFXmAzfRLLHwkkaDfxYavqeAkHkZwO38AKrmOAX8xeT3Za";
             String accessToken = "1047103668-xIjGMsHDhRYO7kCAWPfs8clqodrE48SSWd0dQvb";
@@ -48,14 +75,6 @@ public class TwitterDataAnalytics {
             String brand = scanner.next();
 
             String[] filters={brand};
-//            TwitterUtils.createStream(sc,filters).
-//                    flatMap(s -> Arrays.asList(s.getHashtagEntities())).
-//                    map(h -> h.getText().toLowerCase()).
-//                    filter(h -> !h.equals("android")).
-//                    countByValue().
-//                    print();
-
-            //
 
             final Configuration conf = new ConfigurationBuilder().setDebugEnabled(false)
                     .setOAuthConsumerKey(consumerKey)
@@ -88,38 +107,41 @@ public class TwitterDataAnalytics {
 
                     @Override
                     public void call(Tuple2<String, Integer> t) throws Exception {
-//                        System.out.println(t._1() + "," + t._2());
+                        Producer<String, String> producer = new KafkaProducer<String, String>(props);
 
                         String jsonString = new JSONObject()
                                         .put(t._1(), t._2).toString();
 
                         System.out.println(jsonString);
-//                        Files.write(Paths.get("/Users/sjamithireddy/Desktop/output.txt"), jsonString.getBytes());
-                        try
-                        {
-                            String filename= "/Users/sjamithireddy/Desktop/output.txt";
-                            FileWriter fw = new FileWriter(filename,true); //the true will append the new data
-                            fw.write(jsonString);//appends the string to the file
-                            fw.write("\n");
-                            fw.close();
-                        }
-                        catch(IOException ioe)
-                        {
-                            System.err.println("IOException: " + ioe.getMessage());
-                        }
+                            producer.send(new ProducerRecord<String, String>(topicName,
+                                    jsonString));
                     }
 
                 });
             });
-            // Triggers the start of processing. Nothing happens if streaming context is not started
-
-
-
-            //
             sc.start();
             sc.awaitTermination();
 
 
         }
+
+        private static Tweet buildNewTweet(Status status) {
+        return new Tweet(status.getUser().getId(),
+                status.getUser().getName(),
+                status.getUser().getScreenName(),
+                status.getUser().getMiniProfileImageURL(),
+                replaceNewLines(status.getText()),
+                status.getGeoLocation() == null ? null : status.getGeoLocation().getLatitude(),
+                status.getGeoLocation() == null ? null : status.getGeoLocation().getLongitude(),
+                status.getLang(),
+                status.getSource(),
+                0,
+                new Date(),
+                status.getRetweetCount());
+    }
+
+    private static String replaceNewLines(String text) {
+        return text.replace("\n", "");
+    }
     }
 
